@@ -1,15 +1,16 @@
 /******************************************************
  * server.js
  ******************************************************/
+// 1. Importar módulos
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// IMPORTA TUS ARCHIVOS DE CARTAS
+// 2. Importar cartas (usa tus archivos blackCards.js y whiteCards.js)
 const blackCardsData = require('./blackCards.js');
 const whiteCardsData = require('./whiteCards.js');
 
-// Mezclar arrays
+// 3. Función para barajar arrays
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -18,30 +19,36 @@ function shuffleArray(array) {
   return array;
 }
 
-let players = [];             
-let blackCards = [];          
-let whiteCards = [];          
-let currentSubmissions = [];  
-let currentZarIndex = 0;      
-let extraDiscardTimer = null; 
+// 4. Variables globales
+let players = [];
+let blackCards = [];
+let whiteCards = [];
+let currentSubmissions = [];
+
+let currentZarIndex = 0;
+let extraDiscardTimer = null;
 let discardInterval = null;
 let timeLeft = 0;
-let gameInProgress = false; // Bloquear uniones al iniciar
 
-let extraPhaseActive = false; // Para saber si estamos en los 15 seg extra
+let gameInProgress = false; // bloquea unirse tras "startGame"
+let hostId = null;          // quién es el anfitrión
 
+let extraPhaseActive = false; // Indica si estamos en los 15s extra
+
+// 5. Crear servidor con Express + Socket.IO
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Servir carpeta "public"
 app.use(express.static('public'));
 
 // ===================== Reglas de Rondas =====================
 function startNewRound() {
-  // Termina la fase extra, por si quedaba
+  // Salimos de la fase extra, por si quedaba
   extraPhaseActive = false;
 
-  // Retirar Zar anterior
+  // Retirar al Zar anterior
   players[currentZarIndex].isCzar = false;
   // Avanzar Zar
   currentZarIndex = (currentZarIndex + 1) % players.length;
@@ -50,7 +57,7 @@ function startNewRound() {
   // Siguiente carta negra
   const currentBlackCard = blackCards.shift();
 
-  // Emitir roundStarted
+  // Emitir "roundStarted"
   io.emit('roundStarted', {
     blackCard: currentBlackCard,
     players: players.map(({ id, name, points, isCzar }) => ({
@@ -58,9 +65,9 @@ function startNewRound() {
     }))
   });
 
-  // Reenviar mano
+  // Reenviar la mano a cada jugador
   players.forEach(p => {
-    p.hasDiscarded = false; // reset
+    p.hasDiscarded = false;
     io.to(p.id).emit('yourHand', { cards: p.cards });
   });
 
@@ -68,20 +75,18 @@ function startNewRound() {
 }
 
 function checkAllDiscarded() {
+  // Chequeamos solo si estamos en fase extra
   if (!extraPhaseActive) {
-    // Si no estamos en la fase extra, no mostramos nada global
     return;
   }
-  // En fase extra, sí chequeamos y anunciamos
   const stillDiscarding = players.filter(p => !p.hasDiscarded);
   if (stillDiscarding.length === 0) {
-    // Todos descartaron
+    // Todos descartaron antes de que acabe el tiempo
     clearTimeout(extraDiscardTimer);
     clearInterval(discardInterval);
     io.emit('discardPhaseEnded');
     startNewRound();
   } else {
-    // Avisar a todos quién falta
     const names = stillDiscarding.map(p => p.name);
     io.emit('discardingStatus', { stillDiscarding: names });
   }
@@ -113,8 +118,11 @@ io.on('connection', (socket) => {
 
   // Unirse
   socket.on('joinGame', (playerName) => {
+    // Si la partida ya arrancó, no permitimos unirse
     if (gameInProgress) {
-      socket.emit('errorMessage', { message: 'El juego ya está en curso, no puedes unirte ahora.' });
+      socket.emit('errorMessage', {
+        message: 'El juego ya está en curso, no puedes unirte ahora.'
+      });
       return;
     }
 
@@ -126,6 +134,7 @@ io.on('connection', (socket) => {
       isCzar: false,
       hasDiscarded: false
     });
+
     io.emit('updatePlayers', players);
   });
 
@@ -137,11 +146,21 @@ io.on('connection', (socket) => {
       });
       return;
     }
+
+    // Si no hay host, este socket es el host
+    if (!hostId) {
+      hostId = socket.id;
+      // Notificamos a ese socket que es el host
+      io.to(hostId).emit('youAreHost');
+    }
+
     gameInProgress = true;
 
+    // Barajar
     blackCards = shuffleArray([...blackCardsData]);
     whiteCards = shuffleArray([...whiteCardsData]);
 
+    // Repartir 8 cartas a cada jugador
     players.forEach(p => {
       p.cards = whiteCards.splice(0, 8);
       p.points = 0;
@@ -149,10 +168,13 @@ io.on('connection', (socket) => {
       p.hasDiscarded = false;
     });
 
+    // Asignar ZAR al primer jugador
     currentZarIndex = 0;
     players[currentZarIndex].isCzar = true;
 
     const currentBlackCard = blackCards.shift();
+
+    // Emitir roundStarted
     io.emit('roundStarted', {
       blackCard: currentBlackCard,
       players: players.map(({ id, name, points, isCzar }) => ({
@@ -160,21 +182,20 @@ io.on('connection', (socket) => {
       }))
     });
 
-    players.forEach(p => {
-      io.to(p.id).emit('yourHand', { cards: p.cards });
+    // Enviar la mano a cada jugador
+    players.forEach((pl) => {
+      io.to(pl.id).emit('yourHand', { cards: pl.cards });
     });
 
     currentSubmissions = [];
   });
 
-  // Enviar 1 carta
+  // Evento: enviar 1 carta
   socket.on('submitCards', ({ chosenCard }) => {
     const player = players.find(p => p.id === socket.id);
     if (!player) return;
-
-    // El Zar no envía cartas
+    // El Zar no envía
     if (player.isCzar) {
-      // ignorar
       return;
     }
 
@@ -184,9 +205,10 @@ io.on('connection', (socket) => {
       cardId: chosenCard.id
     });
 
+    // Quitar de la mano
     player.cards = player.cards.filter(c => c.id !== chosenCard.id);
 
-    // check si todos enviaron
+    // Si todos los no-Zar enviaron
     const nonZarPlayers = players.filter(pl => !pl.isCzar);
     if (currentSubmissions.length === nonZarPlayers.length) {
       const submissionsToShow = currentSubmissions.map(s => {
@@ -201,14 +223,16 @@ io.on('connection', (socket) => {
     }
   });
 
-  // El Zar elige
+  // Evento: el Zar elige ganador
   socket.on('selectWinner', (submissionId) => {
     const chosen = currentSubmissions.find(s => s.submissionId === submissionId);
     if (!chosen) return;
+
     const winner = players.find(p => p.id === chosen.playerId);
     if (!winner) return;
 
     winner.points++;
+
     io.emit('roundResult', {
       winnerId: winner.id,
       winnerName: winner.name,
@@ -218,10 +242,12 @@ io.on('connection', (socket) => {
     });
 
     currentSubmissions = [];
+
+    // Entramos en la fase extra para descartar
     startExtraDiscardPhase();
   });
 
-  // Descartar (una vez por ronda, hasta 3)
+  // Descartar (una sola vez, hasta 3 cartas)
   socket.on('requestDiscard', ({ discardCardIds }) => {
     const player = players.find(p => p.id === socket.id);
     if (!player) return;
@@ -235,7 +261,7 @@ io.on('connection', (socket) => {
     }
 
     if (discardCardIds.length > 3) {
-      return;
+      return; // ignora
     }
 
     // Quitar
@@ -244,30 +270,72 @@ io.on('connection', (socket) => {
       player.cards.push(whiteCards.shift());
     }
 
-    // Marcamos
     player.hasDiscarded = true;
 
-    // Enviamos mano actualizada
     io.to(player.id).emit('updateHand', { cards: player.cards });
 
-    // checkAllDiscarded SOLO si estamos en fase extra
     checkAllDiscarded();
   });
 
-  // Desconectar manual
+  // Evento: terminar el juego manualmente (solo host)
+  socket.on('endGame', () => {
+    if (socket.id !== hostId) {
+      io.to(socket.id).emit('errorMessage', {
+        message: 'No tienes permiso para terminar la partida.'
+      });
+      return;
+    }
+
+    // Fin de la partida
+    gameInProgress = false;
+    extraPhaseActive = false;
+
+    // Ordenamos jugadores por puntaje
+    const sortedPlayers = [...players].sort((a, b) => b.points - a.points);
+
+    // Emitir puntajes finales
+    io.emit('gameEnded', {
+      scores: sortedPlayers.map(p => ({
+        name: p.name,
+        points: p.points
+      }))
+    });
+
+    // Reseteo total
+    players = [];
+    hostId = null;
+    console.log('Juego terminado manualmente por el host.');
+  });
+
+  // Desconexión manual
   socket.on('disconnectPlayer', () => {
     players = players.filter(p => p.id !== socket.id);
     io.emit('updatePlayers', players);
+
+    // Si no queda nadie, reset
+    if (players.length === 0) {
+      gameInProgress = false;
+      hostId = null;
+      console.log('No hay jugadores; la partida se resetea.');
+    }
   });
 
-  // Desconexión
+  // Desconexión automática (cerró pestaña, etc.)
   socket.on('disconnect', () => {
     players = players.filter(p => p.id !== socket.id);
     io.emit('updatePlayers', players);
+
+    // Si no queda nadie, reset
+    if (players.length === 0) {
+      gameInProgress = false;
+      hostId = null;
+      console.log('No hay jugadores; la partida se resetea.');
+    }
   });
 });
 
-const PORT = process.env.PORT || 3000; 
+// 7. Escuchar en puerto (Railway usará process.env.PORT)
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });

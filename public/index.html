@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Juego - Versión Final</title>
+  <title>Juego - Cards Against Humanity</title>
   <style>
     .card-selection {
       border: 1px solid blue;
@@ -13,7 +13,7 @@
       background-color: #f5f5f5;
     }
     .card-selected {
-      background-color: #d3ffd3; /* color al seleccionar */
+      background-color: #d3ffd3;
     }
     #discardingStatus {
       color: brown;
@@ -31,12 +31,14 @@
     <button id="joinBtn">Unirse</button>
     <button id="startBtn" style="display: none;">Iniciar Partida</button>
     <button id="disconnectBtn" style="display: none;">Desconectarse</button>
+    <button id="endGameBtn" style="display: none;">Terminar el Juego</button>
     <div id="playersList"></div>
   </div>
 
   <!-- PANTALLA DE JUEGO -->
   <div id="game" style="display: none;">
     <h2>Partida en curso</h2>
+
     <div>
       <strong id="zarIndicator" style="color: red; display: none;">¡ERES EL ZAR!</strong>
     </div>
@@ -94,20 +96,21 @@
     const joinBtn = document.getElementById('joinBtn');
     const startBtn = document.getElementById('startBtn');
     const disconnectBtn = document.getElementById('disconnectBtn');
+    const endGameBtn = document.getElementById('endGameBtn');
     const playersList = document.getElementById('playersList');
 
     // Juego
     const gameDiv = document.getElementById('game');
     const zarIndicator = document.getElementById('zarIndicator');
     const blackCardPrompt = document.getElementById('blackCardPrompt');
-    const submitCardBtn = document.getElementById('submitCardBtn');
-    const discardBtn = document.getElementById('discardBtn');
     const myHandDiv = document.getElementById('myHand');
     const statusMsg = document.getElementById('statusMsg');
     const discardingStatus = document.getElementById('discardingStatus');
 
     // Modo
     const modeRadios = document.getElementsByName('mode');
+    const submitCardBtn = document.getElementById('submitCardBtn');
+    const discardBtn = document.getElementById('discardBtn');
 
     // Submissions
     const submissionsSection = document.getElementById('submissionsSection');
@@ -125,9 +128,10 @@
     let myPlayerId = null;
     let isZar = false;
     let myHand = [];
-    let selectedCards = []; 
-    let hasSentCard = false; 
+    let selectedCards = [];
+    let hasSentCard = false;
     let extraTimeInterval = null;
+    let iAmHost = false; // Para saber si soy el host
 
     /********************************************************
      * EVENTOS DE BOTONES
@@ -148,17 +152,17 @@
       socket.emit('startGame');
     });
 
-    // Enviar la carta (solo 1)
     submitCardBtn.addEventListener('click', () => {
       if (hasSentCard) {
         alert("Ya enviaste tu carta en esta ronda.");
         return;
       }
+      // Solo 1 carta
       if (selectedCards.length !== 1) {
         alert("Selecciona exactamente 1 carta en Modo Enviar.");
         return;
       }
-      // Si soy ZAR y quiero enviar => no se puede
+      // No se puede si eres Zar
       if (isZar) {
         alert("Eres el ZAR, no participas enviando carta.");
         return;
@@ -172,14 +176,13 @@
       renderMyHand();
     });
 
-    // Descartar
     discardBtn.addEventListener('click', () => {
       if (selectedCards.length === 0) {
         alert("No has seleccionado ninguna carta para descartar.");
         return;
       }
       if (selectedCards.length > 3) {
-        alert("No puedes descartar más de 3 cartas a la vez.");
+        alert("No puedes descartar más de 3 cartas.");
         return;
       }
       const discardIds = selectedCards.map(c => c.id);
@@ -189,22 +192,31 @@
       renderMyHand();
     });
 
+    // Botón "Terminar el juego" (solo host)
+    endGameBtn.addEventListener('click', () => {
+      socket.emit('endGame');
+    });
+
     /********************************************************
      * SOCKET LISTENERS
      ********************************************************/
+    // Guardar mi socket.id al conectarme
     socket.on('connect', () => {
       myPlayerId = socket.id;
     });
 
+    // Errores
     socket.on('errorMessage', (data) => {
       alert(data.message);
     });
 
+    // Lista de jugadores actualizada
     socket.on('updatePlayers', (players) => {
       playersList.innerHTML = '<h3>Jugadores conectados:</h3>';
       players.forEach((p) => {
         playersList.innerHTML += `<div>${p.name} (Puntos: ${p.points})</div>`;
       });
+
       const me = players.find(p => p.id === myPlayerId);
       if (me) {
         joinBtn.style.display = 'none';
@@ -214,8 +226,15 @@
       }
     });
 
+    // El servidor me avisa que soy host
+    socket.on('youAreHost', () => {
+      iAmHost = true;
+      endGameBtn.style.display = 'block'; // Mostrar botón "Terminar el juego"
+    });
+
+    // Comienza la ronda
     socket.on('roundStarted', (data) => {
-      // UI
+      // Ocultamos lobby, mostramos juego
       lobbyDiv.style.display = 'none';
       gameDiv.style.display = 'block';
       extraTimeMsg.style.display = 'none';
@@ -228,18 +247,18 @@
       submissionsList.innerHTML = '';
       statusMsg.innerText = '';
 
-      // Quien es ZAR
+      // Quién es ZAR
       const me = data.players.find(p => p.id === myPlayerId);
       isZar = me ? me.isCzar : false;
       zarIndicator.style.display = isZar ? 'inline-block' : 'none';
       blackCardPrompt.innerText = data.blackCard ? data.blackCard.text : 'Sin carta negra';
 
-      // Reseteo
+      // Reseteo flags
       hasSentCard = false;
       submitCardBtn.disabled = false;
       selectedCards = [];
 
-      // Si soy ZAR, no puedo enviar carta
+      // Si soy ZAR, no envío carta
       if (isZar) {
         submitCardBtn.style.display = 'none';
         statusMsg.innerText = "Eres el ZAR esta ronda. No envías carta.";
@@ -249,11 +268,13 @@
       }
     });
 
+    // Recibo mi mano
     socket.on('yourHand', (data) => {
       myHand = data.cards;
       renderMyHand();
     });
 
+    // Mostrar submissions
     socket.on('showSubmissions', (submissions) => {
       submissionsSection.style.display = 'block';
       submissionsList.innerHTML = '';
@@ -266,7 +287,7 @@
           <p>${s.text}</p>
           ${
             isZar 
-              ? `<button onclick="selectWinner('${s.submissionId}')">Elegir Ganadora</button>` 
+              ? `<button onclick="selectWinner('${s.submissionId}')">Elegir Ganadora</button>`
               : ''
           }
         `;
@@ -274,6 +295,7 @@
       });
     });
 
+    // Resultado de la ronda
     socket.on('roundResult', (data) => {
       resultsSection.style.display = 'block';
       winnerInfo.innerHTML = `
@@ -282,13 +304,12 @@
       `;
     });
 
-    // Empieza fase extra
+    // Fase extra
     socket.on('extraDiscardTime', ({ seconds }) => {
       extraTimeMsg.style.display = 'block';
       extraTimeSec.innerText = seconds;
     });
 
-    // Actualiza el contador
     socket.on('updateDiscardTime', ({ timeLeft }) => {
       extraTimeSec.innerText = timeLeft;
       if (timeLeft <= 0) {
@@ -296,13 +317,13 @@
       }
     });
 
-    // Al terminar la fase
+    // Termina la fase de descarte
     socket.on('discardPhaseEnded', () => {
       extraTimeMsg.style.display = 'none';
       discardingStatus.innerText = '';
     });
 
-    // Faltan por descartar
+    // Quién sigue descartando (solo en fase extra)
     socket.on('discardingStatus', ({ stillDiscarding }) => {
       if (stillDiscarding.length > 0) {
         discardingStatus.innerText = `Faltan por descartar: ${stillDiscarding.join(', ')}`;
@@ -311,9 +332,21 @@
       }
     });
 
+    // Actualizar mano post-descartar
     socket.on('updateHand', (data) => {
       myHand = data.cards;
       renderMyHand();
+    });
+
+    // Fin del juego manual
+    socket.on('gameEnded', (data) => {
+      // Muestra ranking final
+      console.log('Se terminó el juego. Puntajes:', data.scores);
+      alert('¡El juego ha terminado!\n\n' + 
+        data.scores.map(s => `${s.name}: ${s.points} pts`).join('\n'));
+      
+      // Resetea la interfaz
+      resetUI();
     });
 
     /********************************************************
@@ -321,9 +354,7 @@
      ********************************************************/
     function renderMyHand() {
       myHandDiv.innerHTML = '';
-      // Reseteamos la selección
       selectedCards = [];
-
       myHand.forEach(card => {
         const cDiv = document.createElement('div');
         cDiv.classList.add('card-selection');
@@ -341,9 +372,9 @@
         selectedCards.splice(index, 1);
         elDiv.classList.remove('card-selected');
       } else {
+        // Modo
         let m = getMode();
         if (m === 'send') {
-          // Si ya enviaste, no dejes
           if (hasSentCard) {
             alert("Ya enviaste tu carta en esta ronda.");
             return;
@@ -378,12 +409,15 @@
     window.selectWinner = selectWinner;
 
     function resetUI() {
+      // Regresar al lobby, ocultar la pantalla de juego
       lobbyDiv.style.display = 'block';
       gameDiv.style.display = 'none';
       playerNameInput.value = '';
       joinBtn.style.display = 'block';
       disconnectBtn.style.display = 'none';
       startBtn.style.display = 'none';
+      endGameBtn.style.display = 'none';
+      iAmHost = false;
     }
   </script>
 </body>

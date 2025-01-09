@@ -2,83 +2,91 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Juego - Cards Against Humanity</title>
+  <title>Juego Ajustado</title>
   <style>
     .card-selection {
-      border: 1px solid blue;
-      margin: 3px;
-      padding: 3px;
-      display: inline-block;
+      border: 1px solid blue; 
+      margin: 3px; 
+      padding: 3px; 
+      display: inline-block; 
       cursor: pointer;
       background-color: #f5f5f5;
     }
     .card-selected {
       background-color: #d3ffd3;
     }
+    /* Pantalla intermedia */
+    #intermediateScreen {
+      position: fixed; 
+      top:0; left:0; 
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7); 
+      color: #fff;
+      display: none; 
+      justify-content: center; 
+      align-items: center; 
+      z-index: 9999;
+    }
+    #intermediateMsg {
+      font-size: 2em;
+      text-align: center;
+    }
     #discardingStatus {
-      color: brown;
-      margin-top: 10px;
+      color: brown; 
+      margin-top: 10px; 
       font-weight: bold;
     }
   </style>
 </head>
 <body>
-  <h1>Bienvenido a mi Juego</h1>
+  <h1>Mi Juego</h1>
+
+  <!-- Pantalla intermedia -->
+  <div id="intermediateScreen">
+    <div id="intermediateMsg"></div>
+  </div>
 
   <!-- LOBBY -->
   <div id="lobby">
-    <input type="text" id="playerName" placeholder="Tu nombre...">
+    <input type="text" id="playerName" placeholder="Tu nombre">
     <button id="joinBtn">Unirse</button>
     <button id="startBtn" style="display: none;">Iniciar Partida</button>
     <button id="disconnectBtn" style="display: none;">Desconectarse</button>
-    <button id="endGameBtn" style="display: none;">Terminar el Juego</button>
+    <button id="endGameBtn" style="display: none;">Terminar Partida</button>
     <div id="playersList"></div>
   </div>
 
   <!-- PANTALLA DE JUEGO -->
   <div id="game" style="display: none;">
     <h2>Partida en curso</h2>
-
+    <div id="zarIndicator" style="color:red; display:none;">¡ERES EL ZAR!</div>
     <div>
-      <strong id="zarIndicator" style="color: red; display: none;">¡ERES EL ZAR!</strong>
+      <strong id="blackCardPrompt"></strong>
     </div>
 
-    <div>
-      <strong id="blackCardPrompt" style="font-size: 1.2em;"></strong>
-    </div>
-
-    <!-- Mostrar mano -->
     <div>
       <h3>Mi mano (8 cartas):</h3>
       <div id="myHand"></div>
-
-      <!-- Modo Enviar / Descartar -->
-      <div style="margin-top: 10px;">
+      <div style="margin-top:10px;">
         <label><input type="radio" name="mode" value="send" checked> Modo Enviar</label>
         <label><input type="radio" name="mode" value="discard"> Modo Descartar</label>
       </div>
 
-      <button id="submitCardBtn" style="display: none;">Enviar Carta Seleccionada</button>
-      <button id="discardBtn">Descartar Carta(s) Seleccionada(s) (máx 3)</button>
-      <div id="statusMsg" style="color: green;"></div>
+      <button id="submitCardBtn" style="display:none;">Enviar Carta Seleccionada</button>
+      <button id="discardBtn">Descartar Carta(s) (máx 3)</button>
+
+      <div id="statusMsg" style="color:green;"></div>
       <div id="discardingStatus"></div>
     </div>
 
-    <!-- Submissions -->
-    <div id="submissionsSection" style="display: none;">
+    <div id="submissionsSection" style="display:none;">
       <h3>Cartas enviadas:</h3>
       <div id="submissionsList"></div>
     </div>
 
-    <!-- Resultados -->
-    <div id="resultsSection" style="display: none;">
+    <div id="resultsSection" style="display:none;">
       <h3>Resultado de la ronda:</h3>
       <div id="winnerInfo"></div>
-    </div>
-
-    <!-- Extra Time -->
-    <div id="extraTimeMsg" style="display: none; color: green;">
-      Fase extra de descarte. Quedan <span id="extraTimeSec"></span> segundos...
     </div>
   </div>
 
@@ -86,7 +94,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script>
     /********************************************************
-     * REFERENCIAS DOM
+     * DOM
      ********************************************************/
     const socket = io();
 
@@ -106,23 +114,17 @@
     const myHandDiv = document.getElementById('myHand');
     const statusMsg = document.getElementById('statusMsg');
     const discardingStatus = document.getElementById('discardingStatus');
-
-    // Modo
     const modeRadios = document.getElementsByName('mode');
     const submitCardBtn = document.getElementById('submitCardBtn');
     const discardBtn = document.getElementById('discardBtn');
-
-    // Submissions
     const submissionsSection = document.getElementById('submissionsSection');
     const submissionsList = document.getElementById('submissionsList');
-
-    // Resultados
     const resultsSection = document.getElementById('resultsSection');
     const winnerInfo = document.getElementById('winnerInfo');
 
-    // Extra time
-    const extraTimeMsg = document.getElementById('extraTimeMsg');
-    const extraTimeSec = document.getElementById('extraTimeSec');
+    // Pantalla intermedia
+    const intermediateScreen = document.getElementById('intermediateScreen');
+    const intermediateMsg = document.getElementById('intermediateMsg');
 
     // Variables
     let myPlayerId = null;
@@ -130,11 +132,10 @@
     let myHand = [];
     let selectedCards = [];
     let hasSentCard = false;
-    let extraTimeInterval = null;
-    let iAmHost = false; // Para saber si soy el host
+    let iAmHost = false;
 
     /********************************************************
-     * EVENTOS DE BOTONES
+     * BOTONES
      ********************************************************/
     joinBtn.addEventListener('click', () => {
       const name = playerNameInput.value.trim();
@@ -154,45 +155,42 @@
 
     submitCardBtn.addEventListener('click', () => {
       if (hasSentCard) {
-        alert("Ya enviaste tu carta en esta ronda.");
+        alert("Ya enviaste tu carta.");
         return;
       }
-      // Solo 1 carta
       if (selectedCards.length !== 1) {
-        alert("Selecciona exactamente 1 carta en Modo Enviar.");
+        alert("Selecciona exactamente 1 carta.");
         return;
       }
-      // No se puede si eres Zar
       if (isZar) {
-        alert("Eres el ZAR, no participas enviando carta.");
+        alert("Eres el ZAR, no envías carta.");
         return;
       }
       const chosenCard = selectedCards[0];
       socket.emit('submitCards', { chosenCard });
       hasSentCard = true;
       submitCardBtn.disabled = true;
-      statusMsg.innerText = "¡Has enviado tu carta!";
+      statusMsg.innerText = "¡Carta enviada!";
       selectedCards = [];
       renderMyHand();
     });
 
     discardBtn.addEventListener('click', () => {
       if (selectedCards.length === 0) {
-        alert("No has seleccionado ninguna carta para descartar.");
+        alert("No seleccionaste cartas para descartar.");
         return;
       }
       if (selectedCards.length > 3) {
-        alert("No puedes descartar más de 3 cartas.");
+        alert("Máximo 3 cartas.");
         return;
       }
       const discardIds = selectedCards.map(c => c.id);
       socket.emit('requestDiscard', { discardCardIds: discardIds });
-      statusMsg.innerText = "Descartaste " + selectedCards.length + " cartas.";
+      statusMsg.innerText = "Descartaste " + selectedCards.length + " carta(s).";
       selectedCards = [];
       renderMyHand();
     });
 
-    // Botón "Terminar el juego" (solo host)
     endGameBtn.addEventListener('click', () => {
       socket.emit('endGame');
     });
@@ -200,85 +198,84 @@
     /********************************************************
      * SOCKET LISTENERS
      ********************************************************/
-    // Guardar mi socket.id al conectarme
     socket.on('connect', () => {
       myPlayerId = socket.id;
     });
 
-    // Errores
     socket.on('errorMessage', (data) => {
       alert(data.message);
     });
 
-    // Lista de jugadores actualizada
-    socket.on('updatePlayers', (players) => {
+    socket.on('updatePlayers', (data) => {
       playersList.innerHTML = '<h3>Jugadores conectados:</h3>';
-      players.forEach((p) => {
-        playersList.innerHTML += `<div>${p.name} (Puntos: ${p.points})</div>`;
+      data.players.forEach(p => {
+        playersList.innerHTML += `<div>${p.name}</div>`;
       });
 
-      const me = players.find(p => p.id === myPlayerId);
-      if (me) {
-        joinBtn.style.display = 'none';
-        playerNameInput.style.display = 'none';
-        disconnectBtn.style.display = 'block';
-        startBtn.style.display = 'block';
-      }
+      joinBtn.style.display = 'none';
+      playerNameInput.style.display = 'none';
+      disconnectBtn.style.display = 'block';
+      startBtn.style.display = 'block';
     });
 
-    // El servidor me avisa que soy host
     socket.on('youAreHost', () => {
       iAmHost = true;
-      endGameBtn.style.display = 'block'; // Mostrar botón "Terminar el juego"
     });
 
-    // Comienza la ronda
+    // Inicia la ronda
     socket.on('roundStarted', (data) => {
-      // Ocultamos lobby, mostramos juego
+      // Quitar pantalla intermedia si estaba
+      intermediateScreen.style.display = "none";
+
       lobbyDiv.style.display = 'none';
       gameDiv.style.display = 'block';
-      extraTimeMsg.style.display = 'none';
-      discardingStatus.innerText = '';
-      if (extraTimeInterval) clearInterval(extraTimeInterval);
-
       resultsSection.style.display = 'none';
       winnerInfo.innerHTML = '';
       submissionsSection.style.display = 'none';
       submissionsList.innerHTML = '';
       statusMsg.innerText = '';
+      discardingStatus.innerText = '';
 
-      // Quién es ZAR
+      // Quién soy
       const me = data.players.find(p => p.id === myPlayerId);
       isZar = me ? me.isCzar : false;
-      zarIndicator.style.display = isZar ? 'inline-block' : 'none';
-      blackCardPrompt.innerText = data.blackCard ? data.blackCard.text : 'Sin carta negra';
+      zarIndicator.style.display = isZar ? 'block' : 'none';
+      blackCardPrompt.textContent = data.blackCard ? data.blackCard.text : 'Sin carta negra';
 
-      // Reseteo flags
       hasSentCard = false;
       submitCardBtn.disabled = false;
       selectedCards = [];
 
-      // Si soy ZAR, no envío carta
       if (isZar) {
         submitCardBtn.style.display = 'none';
-        statusMsg.innerText = "Eres el ZAR esta ronda. No envías carta.";
+        statusMsg.innerText = "Eres el ZAR, no envías carta.";
       } else {
         submitCardBtn.style.display = 'inline-block';
-        statusMsg.innerText = '';
+      }
+
+      // Botón terminar partida si soy host
+      if (iAmHost) {
+        endGameBtn.style.display = 'inline-block';
       }
     });
 
-    // Recibo mi mano
+    // “showIntermediate”: Pantalla de 3 seg con un mensaje
+    socket.on('showIntermediate', (data) => {
+      intermediateMsg.textContent = data.message || "Espera un momento...";
+      intermediateScreen.style.display = "flex";
+    });
+
+    // Mano actualizada
     socket.on('yourHand', (data) => {
       myHand = data.cards;
       renderMyHand();
     });
 
-    // Mostrar submissions
-    socket.on('showSubmissions', (submissions) => {
+    // Muestran submissions
+    socket.on('showSubmissions', (subs) => {
       submissionsSection.style.display = 'block';
       submissionsList.innerHTML = '';
-      submissions.forEach(s => {
+      subs.forEach(s => {
         const div = document.createElement('div');
         div.style.border = '1px solid #ccc';
         div.style.margin = '5px';
@@ -286,71 +283,46 @@
         div.innerHTML = `
           <p>${s.text}</p>
           ${
-            isZar 
-              ? `<button onclick="selectWinner('${s.submissionId}')">Elegir Ganadora</button>`
-              : ''
+            isZar ? `<button onclick="selectWinner('${s.submissionId}')">Elegir Ganadora</button>` : ''
           }
         `;
         submissionsList.appendChild(div);
       });
     });
 
-    // Resultado de la ronda
+    // Al Zar elige ganador => roundResult
     socket.on('roundResult', (data) => {
       resultsSection.style.display = 'block';
-      winnerInfo.innerHTML = `
-        Ganó <strong>${data.winnerName}</strong> (+1 punto).
-        <br/>Total: ${data.totalPoints} puntos.
-      `;
+      winnerInfo.innerHTML = 
+        `Ganó <strong>${data.winnerName}</strong> (+1 punto).<br/>
+         Total: ${data.totalPoints} puntos.`;
     });
 
-    // Fase extra
-    socket.on('extraDiscardTime', ({ seconds }) => {
-      extraTimeMsg.style.display = 'block';
-      extraTimeSec.innerText = seconds;
+    // stillDiscarding => “X, Y no descartaron. Tienen N seg...”
+    socket.on('stillDiscarding', (data) => {
+      discardingStatus.innerText = 
+        `${data.names.join(', ')} todavía no descartaron. 
+         Tienen ${data.timeLeft}s para hacerlo.`;
     });
 
-    socket.on('updateDiscardTime', ({ timeLeft }) => {
-      extraTimeSec.innerText = timeLeft;
-      if (timeLeft <= 0) {
-        extraTimeMsg.style.display = 'none';
-      }
-    });
-
-    // Termina la fase de descarte
+    // Fase de descarte termina
     socket.on('discardPhaseEnded', () => {
-      extraTimeMsg.style.display = 'none';
       discardingStatus.innerText = '';
     });
 
-    // Quién sigue descartando (solo en fase extra)
-    socket.on('discardingStatus', ({ stillDiscarding }) => {
-      if (stillDiscarding.length > 0) {
-        discardingStatus.innerText = `Faltan por descartar: ${stillDiscarding.join(', ')}`;
-      } else {
-        discardingStatus.innerText = '';
-      }
-    });
-
-    // Actualizar mano post-descartar
-    socket.on('updateHand', (data) => {
-      myHand = data.cards;
+    // Actualiza la mano tras descartar
+    socket.on('updateHand', (d) => {
+      myHand = d.cards;
       renderMyHand();
     });
 
-    // Fin del juego manual
+    // Fin manual
     socket.on('gameEnded', (data) => {
-      // Muestra ranking final
-      console.log('Se terminó el juego. Puntajes:', data.scores);
-      alert('¡El juego ha terminado!\n\n' + 
-        data.scores.map(s => `${s.name}: ${s.points} pts`).join('\n'));
-      
-      // Resetea la interfaz
-      resetUI();
+      showFinalScores(data.scores);
     });
 
     /********************************************************
-     * FUNCIONES AUXILIARES
+     * FUNCIONES
      ********************************************************/
     function renderMyHand() {
       myHandDiv.innerHTML = '';
@@ -367,16 +339,15 @@
     }
 
     function toggleCard(card, elDiv) {
-      const index = selectedCards.findIndex(c => c.id === card.id);
+      const index = selectedCards.findIndex(x => x.id === card.id);
       if (index >= 0) {
         selectedCards.splice(index, 1);
         elDiv.classList.remove('card-selected');
       } else {
-        // Modo
         let m = getMode();
         if (m === 'send') {
           if (hasSentCard) {
-            alert("Ya enviaste tu carta en esta ronda.");
+            alert("Ya enviaste tu carta.");
             return;
           }
           if (selectedCards.length >= 1) {
@@ -395,7 +366,7 @@
     }
 
     function getMode() {
-      for (let i = 0; i < modeRadios.length; i++) {
+      for (let i=0; i<modeRadios.length; i++){
         if (modeRadios[i].checked) {
           return modeRadios[i].value; // "send" o "discard"
         }
@@ -409,7 +380,6 @@
     window.selectWinner = selectWinner;
 
     function resetUI() {
-      // Regresar al lobby, ocultar la pantalla de juego
       lobbyDiv.style.display = 'block';
       gameDiv.style.display = 'none';
       playerNameInput.value = '';
@@ -418,6 +388,21 @@
       startBtn.style.display = 'none';
       endGameBtn.style.display = 'none';
       iAmHost = false;
+    }
+
+    function showFinalScores(scores) {
+      let msg = "<h2>Puntajes Finales</h2><ul>";
+      scores.forEach(s => {
+        msg += `<li>${s.name}: ${s.points} pts</li>`;
+      });
+      msg += "</ul>";
+      intermediateMsg.innerHTML = msg;
+      intermediateScreen.style.display = "flex";
+
+      setTimeout(() => {
+        intermediateScreen.style.display = "none";
+        resetUI();
+      }, 4000);
     }
   </script>
 </body>

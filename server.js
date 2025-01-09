@@ -1,16 +1,15 @@
 /******************************************************
  * server.js
  ******************************************************/
-// 1. Importar módulos
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 
-// 2. Importar cartas (usa tus archivos blackCards.js y whiteCards.js)
+// Tus archivos de cartas
 const blackCardsData = require('./blackCards.js');
 const whiteCardsData = require('./whiteCards.js');
 
-// 3. Función para barajar arrays
+// Función para barajar
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -19,106 +18,125 @@ function shuffleArray(array) {
   return array;
 }
 
-// 4. Variables globales
-let players = [];
-let blackCards = [];
-let whiteCards = [];
-let currentSubmissions = [];
+let players = [];             // Lista de jugadores
+let blackCards = [];          // Mazo barajado (cartas negras)
+let whiteCards = [];          // Mazo barajado (cartas blancas)
+let currentSubmissions = [];  // Cartas enviadas en la ronda
 
 let currentZarIndex = 0;
-let extraDiscardTimer = null;
-let discardInterval = null;
-let timeLeft = 0;
+let gameInProgress = false;
+let hostId = null;
 
-let gameInProgress = false; // bloquea unirse tras "startGame"
-let hostId = null;          // quién es el anfitrión
+// Manejo de descarte tras elegir ganador
+let discardTimer = null;      // setTimeout
+let discardInterval = null;   // setInterval
+let discardTimeLeft = 0;
+let discardPhaseActive = false;
 
-let extraPhaseActive = false; // Indica si estamos en los 15s extra
-
-// 5. Crear servidor con Express + Socket.IO
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Servir carpeta "public"
 app.use(express.static('public'));
 
-// ===================== Reglas de Rondas =====================
+/******************************************************
+ * Manejo de Rondas
+ ******************************************************/
 function startNewRound() {
-  // Salimos de la fase extra, por si quedaba
-  extraPhaseActive = false;
+  // Quitar descartar
+  discardPhaseActive = false;
 
-  // Retirar al Zar anterior
+  // Pasar al siguiente Zar
   players[currentZarIndex].isCzar = false;
-  // Avanzar Zar
   currentZarIndex = (currentZarIndex + 1) % players.length;
   players[currentZarIndex].isCzar = true;
 
-  // Siguiente carta negra
+  // Sacar la siguiente carta negra
   const currentBlackCard = blackCards.shift();
 
-  // Emitir "roundStarted"
-  io.emit('roundStarted', {
-    blackCard: currentBlackCard,
-    players: players.map(({ id, name, points, isCzar }) => ({
-      id, name, points, isCzar
-    }))
+  io.emit('showIntermediate', {  // Pantalla intermedia por 3s
+    message: "Siguiente ronda en 3 segundos..."
   });
 
-  // Reenviar la mano a cada jugador
-  players.forEach(p => {
-    p.hasDiscarded = false;
-    io.to(p.id).emit('yourHand', { cards: p.cards });
-  });
+  setTimeout(() => {
+    // Enviamos roundStarted
+    io.emit('roundStarted', {
+      blackCard: currentBlackCard,
+      players: players.map(p => ({
+        id: p.id,
+        name: p.name,
+        points: p.points,
+        isCzar: p.isCzar
+      }))
+    });
 
-  currentSubmissions = [];
+    // Resetear “hasDiscarded” para la nueva ronda y reenviar manos
+    players.forEach(pl => {
+      pl.hasDiscarded = false;
+      io.to(pl.id).emit('yourHand', { cards: pl.cards });
+    });
+
+    currentSubmissions = [];
+
+  }, 3000);
 }
 
-function checkAllDiscarded() {
-  // Chequeamos solo si estamos en fase extra
-  if (!extraPhaseActive) {
-    return;
-  }
-  const stillDiscarding = players.filter(p => !p.hasDiscarded);
-  if (stillDiscarding.length === 0) {
-    // Todos descartaron antes de que acabe el tiempo
-    clearTimeout(extraDiscardTimer);
-    clearInterval(discardInterval);
-    io.emit('discardPhaseEnded');
-    startNewRound();
-  } else {
-    const names = stillDiscarding.map(p => p.name);
-    io.emit('discardingStatus', { stillDiscarding: names });
-  }
-}
+function startDiscardPhase() {
+  discardPhaseActive = true;
+  discardTimeLeft = 10; // Ajusta a tu gusto (10 seg)
 
-function startExtraDiscardPhase() {
-  extraPhaseActive = true;
-  timeLeft = 15;
+  // Anunciamos: “X, Y, Z todavía no descartaron. Tienen N seg…”
+  broadcastStillDiscarding();
 
-  io.emit('extraDiscardTime', { seconds: timeLeft });
-
+  // Contador decreciente
   discardInterval = setInterval(() => {
-    timeLeft--;
-    io.emit('updateDiscardTime', { timeLeft });
-    if (timeLeft <= 0) {
+    discardTimeLeft--;
+    broadcastStillDiscarding();
+
+    if (discardTimeLeft <= 0) {
       clearInterval(discardInterval);
     }
   }, 1000);
 
-  extraDiscardTimer = setTimeout(() => {
+  // Al acabar el tiempo, si alguien no descartó, se queda con su mano
+  discardTimer = setTimeout(() => {
+    discardPhaseActive = false;
+    clearInterval(discardInterval);
+
+    // Todos finalizan la fase de descarte
     io.emit('discardPhaseEnded');
+    // Iniciar la siguiente ronda
     startNewRound();
-  }, 15000);
+  }, discardTimeLeft * 1000);
 }
 
-// ===================== Socket.IO =====================
-io.on('connection', (socket) => {
-  console.log('Nuevo cliente conectado:', socket.id);
+// Emite quiénes faltan descartar y tiempo restante
+function broadcastStillDiscarding() {
+  const still = players.filter(p => !p.hasDiscarded);
+  if (still.length === 0) {
+    // Nadie falta, terminamos antes
+    clearTimeout(discardTimer);
+    clearInterval(discardInterval);
+    discardPhaseActive = false;
+    io.emit('discardPhaseEnded');
+    startNewRound();
+    return;
+  }
+  // Mandamos la lista y el tiempo
+  io.emit('stillDiscarding', {
+    names: still.map(p => p.name),
+    timeLeft: discardTimeLeft
+  });
+}
 
-  // Unirse
+/******************************************************
+ * Socket.IO main logic
+ ******************************************************/
+io.on('connection', (socket) => {
+  console.log('Cliente conectado:', socket.id);
+
+  // Unirse al lobby
   socket.on('joinGame', (playerName) => {
-    // Si la partida ya arrancó, no permitimos unirse
     if (gameInProgress) {
       socket.emit('errorMessage', {
         message: 'El juego ya está en curso, no puedes unirte ahora.'
@@ -135,10 +153,13 @@ io.on('connection', (socket) => {
       hasDiscarded: false
     });
 
-    io.emit('updatePlayers', players);
+    // Solo mostrar nombres en el lobby
+    io.emit('updatePlayers', {
+      players: players.map(p => ({ name: p.name }))
+    });
   });
 
-  // Iniciar partida
+  // Iniciar la partida
   socket.on('startGame', () => {
     if (players.length < 3) {
       io.to(socket.id).emit('errorMessage', {
@@ -147,20 +168,18 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Si no hay host, este socket es el host
     if (!hostId) {
       hostId = socket.id;
-      // Notificamos a ese socket que es el host
       io.to(hostId).emit('youAreHost');
     }
 
     gameInProgress = true;
 
-    // Barajar
+    // Barajar mazos
     blackCards = shuffleArray([...blackCardsData]);
     whiteCards = shuffleArray([...whiteCardsData]);
 
-    // Repartir 8 cartas a cada jugador
+    // Repartir
     players.forEach(p => {
       p.cards = whiteCards.splice(0, 8);
       p.points = 0;
@@ -168,54 +187,50 @@ io.on('connection', (socket) => {
       p.hasDiscarded = false;
     });
 
-    // Asignar ZAR al primer jugador
     currentZarIndex = 0;
     players[currentZarIndex].isCzar = true;
 
     const currentBlackCard = blackCards.shift();
 
-    // Emitir roundStarted
     io.emit('roundStarted', {
       blackCard: currentBlackCard,
-      players: players.map(({ id, name, points, isCzar }) => ({
-        id, name, points, isCzar
+      players: players.map(p => ({
+        id: p.id,
+        name: p.name,
+        points: p.points,
+        isCzar: p.isCzar
       }))
     });
 
-    // Enviar la mano a cada jugador
-    players.forEach((pl) => {
+    players.forEach(pl => {
       io.to(pl.id).emit('yourHand', { cards: pl.cards });
     });
 
     currentSubmissions = [];
   });
 
-  // Evento: enviar 1 carta
+  // Enviar 1 carta
   socket.on('submitCards', ({ chosenCard }) => {
     const player = players.find(p => p.id === socket.id);
-    if (!player) return;
-    // El Zar no envía
-    if (player.isCzar) {
-      return;
-    }
+    if (!player || player.isCzar) return;
 
     currentSubmissions.push({
-      submissionId: `${socket.id}-${chosenCard.id}`,
+      submissionId: socket.id + '-' + chosenCard.id,
       playerId: player.id,
       cardId: chosenCard.id
     });
 
-    // Quitar de la mano
+    // Quitar la carta
     player.cards = player.cards.filter(c => c.id !== chosenCard.id);
 
     // Si todos los no-Zar enviaron
-    const nonZarPlayers = players.filter(pl => !pl.isCzar);
+    const nonZarPlayers = players.filter(x => !x.isCzar);
     if (currentSubmissions.length === nonZarPlayers.length) {
       const submissionsToShow = currentSubmissions.map(s => {
         const cardObj = whiteCardsData.find(w => w.id === s.cardId);
         return {
           submissionId: s.submissionId,
-          text: cardObj ? cardObj.text : '???',
+          text: cardObj ? cardObj.text : "???",
           playerId: s.playerId
         };
       });
@@ -223,7 +238,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Evento: el Zar elige ganador
+  // El Zar elige ganador
   socket.on('selectWinner', (submissionId) => {
     const chosen = currentSubmissions.find(s => s.submissionId === submissionId);
     if (!chosen) return;
@@ -243,41 +258,39 @@ io.on('connection', (socket) => {
 
     currentSubmissions = [];
 
-    // Entramos en la fase extra para descartar
-    startExtraDiscardPhase();
+    // Aquí empieza la fase de descarte SOLO después de que el Zar elige
+    startDiscardPhase();
   });
 
-  // Descartar (una sola vez, hasta 3 cartas)
+  // Descartar
   socket.on('requestDiscard', ({ discardCardIds }) => {
     const player = players.find(p => p.id === socket.id);
     if (!player) return;
 
-    // Si ya descartó
     if (player.hasDiscarded) {
       io.to(player.id).emit('errorMessage', {
         message: 'Solo puedes descartar una vez por ronda.'
       });
       return;
     }
-
     if (discardCardIds.length > 3) {
-      return; // ignora
+      return;
     }
 
-    // Quitar
     player.cards = player.cards.filter(c => !discardCardIds.includes(c.id));
     while (player.cards.length < 8 && whiteCards.length > 0) {
       player.cards.push(whiteCards.shift());
     }
-
     player.hasDiscarded = true;
 
     io.to(player.id).emit('updateHand', { cards: player.cards });
 
-    checkAllDiscarded();
+    if (discardPhaseActive) {
+      broadcastStillDiscarding();
+    }
   });
 
-  // Evento: terminar el juego manualmente (solo host)
+  // Terminar el juego (host)
   socket.on('endGame', () => {
     if (socket.id !== hostId) {
       io.to(socket.id).emit('errorMessage', {
@@ -286,55 +299,53 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Fin de la partida
     gameInProgress = false;
-    extraPhaseActive = false;
+    discardPhaseActive = false;
+    clearTimeout(discardTimer);
+    clearInterval(discardInterval);
 
-    // Ordenamos jugadores por puntaje
-    const sortedPlayers = [...players].sort((a, b) => b.points - a.points);
+    // Puntajes finales
+    const sorted = [...players].sort((a, b) => b.points - a.points);
 
-    // Emitir puntajes finales
     io.emit('gameEnded', {
-      scores: sortedPlayers.map(p => ({
-        name: p.name,
-        points: p.points
-      }))
+      scores: sorted.map(p => ({ name: p.name, points: p.points }))
     });
 
-    // Reseteo total
+    // Reset
     players = [];
     hostId = null;
-    console.log('Juego terminado manualmente por el host.');
+    console.log("Partida terminada por el host.");
   });
 
-  // Desconexión manual
+  // Desconexión voluntaria
   socket.on('disconnectPlayer', () => {
     players = players.filter(p => p.id !== socket.id);
-    io.emit('updatePlayers', players);
+    io.emit('updatePlayers', {
+      players: players.map(px => ({ name: px.name }))
+    });
 
-    // Si no queda nadie, reset
     if (players.length === 0) {
       gameInProgress = false;
       hostId = null;
-      console.log('No hay jugadores; la partida se resetea.');
+      console.log('No hay jugadores, se resetea la partida.');
     }
   });
 
-  // Desconexión automática (cerró pestaña, etc.)
+  // Desconexión real
   socket.on('disconnect', () => {
     players = players.filter(p => p.id !== socket.id);
-    io.emit('updatePlayers', players);
+    io.emit('updatePlayers', {
+      players: players.map(px => ({ name: px.name }))
+    });
 
-    // Si no queda nadie, reset
     if (players.length === 0) {
       gameInProgress = false;
       hostId = null;
-      console.log('No hay jugadores; la partida se resetea.');
+      console.log('No hay jugadores, se resetea la partida.');
     }
   });
 });
 
-// 7. Escuchar en puerto (Railway usará process.env.PORT)
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);

@@ -2,30 +2,109 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>Cartas Contra la Humanidad</title>
+  <title>“Las Cartas del Caos”</title>
   <style>
+    /* ======== ESTILOS PRINCIPALES ======== */
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: "Trebuchet MS", sans-serif;
+      background: linear-gradient(135deg, #3f4c6b, #606c88);
+      color: #f0f0f0;
+    }
+    h1, h2, h3 {
+      text-align: center;
+      text-shadow: 1px 1px 3px rgba(0,0,0,0.7);
+    }
+
+    /* Contenedor para lobby y juego */
+    #lobby, #game {
+      max-width: 850px;
+      margin: 30px auto;
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 15px;
+      padding: 20px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.5);
+    }
+
+    /* Lobby inputs y layout */
+    #lobby input[type="text"] {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      margin-right: 5px;
+    }
+
+    /* Botones genéricos */
+    button {
+      background: #2ecc71; /* Tono verde/teal */
+      border: none;
+      border-radius: 4px;
+      padding: 10px 15px;
+      color: #fff;
+      cursor: pointer;
+      font-size: 1em;
+      margin: 5px;
+      transition: background 0.3s;
+    }
+    button:hover {
+      background: #27ae60;
+    }
+    button:disabled {
+      background: #7f8c8d;
+      cursor: not-allowed;
+    }
+
+    /* Caja de cartas */
     .card-box {
       border:1px solid #aaa;
       border-radius:6px;
       padding:10px;
       margin:5px;
       display:inline-block;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.4);
+      transition: transform 0.2s;
+      background: #fff;
+      color: #000;
+      min-width: 140px;
+      text-align: center;
+    }
+    .card-box:hover {
+      transform: scale(1.02);
     }
     .card-black {
-      background:#333;
+      background:#2d3436;
       color:#fff;
     }
     .card-white {
-      background:#eee;
+      background:#fafafa;
+      color:#2c3e50;
     }
     .card-selected {
-      border:2px solid green;
+      border:2px solid #2ecc71;
+    }
+
+    /* Submissions primero, luego la mano */
+    #submissionsSection {
+      margin-bottom: 20px;
+    }
+
+    /* Mensajes */
+    #statusMsg {
+      font-style: italic;
+      margin-top: 10px;
+      color: #2ecc71; /* verde suave */
     }
     #discardingStatus {
       margin-top:5px; 
-      color:brown; 
+      color:#e67e22; /* naranja */
       font-weight:bold;
     }
+    #zarIndicator {
+      margin-bottom:10px;
+    }
+
+    /* Pantalla Intermedia */
     #intermediateScreen {
       position:fixed; 
       top:0; left:0; 
@@ -39,20 +118,25 @@
       z-index:9999;
     }
     #intermediateMsg {
-      background:#333; 
-      padding:20px; 
-      border-radius:6px; 
-      font-size:1.2em;
+      background: rgba(20, 20, 20, 0.8);
+      border: 2px solid #2ecc71;
+      border-radius: 10px;
+      width: 380px;
+      padding: 20px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.7);
+      font-size:1.1em;
     }
+
+    /* Ganador */
     #winnerCard {
       margin-top:6px;
       font-weight:bold;
-      color:green;
+      color:#2ecc71;
     }
   </style>
 </head>
 <body>
-  <h1>Cartas Contra la Humanidad</h1>
+  <h1>“Las Cartas del Caos”</h1>
 
   <div id="intermediateScreen">
     <div id="intermediateMsg"></div>
@@ -71,9 +155,14 @@
   <!-- PARTIDA -->
   <div id="game" style="display:none;">
     <h2>Partida en curso</h2>
-    <div id="zarIndicator" style="color:red; display:none;">¡Eres el ZAR!</div>
+    <div id="zarIndicator" style="display:none;">¡Eres el ZAR!</div>
 
-    <div id="blackCardContainer"></div>
+    <div id="submissionsSection" style="display:none;">
+      <h3>Cartas enviadas:</h3>
+      <div id="submissionsList"></div>
+    </div>
+
+    <div id="blackCardContainer" style="margin-bottom:20px;"></div>
     <div id="winnerCard" style="display:none;"></div>
 
     <div>
@@ -81,30 +170,22 @@
       <div id="myHand"></div>
 
       <div style="margin-top:10px;">
-        <!-- Botón para Enviar Carta Seleccionada (si no soy ZAR) -->
         <button id="sendBtn" style="display:none;">Enviar Carta Seleccionada</button>
-        <!-- Botón para Descartar (Max. 3) -->
         <button id="discardBtn">Descartar Cartas Seleccionadas (Max. 3)</button>
-        <!-- Botón para omitir descarte -->
         <button id="omitBtn" style="display:none;">Omitir Descarte</button>
       </div>
 
-      <div id="statusMsg" style="color:green;"></div>
+      <div id="statusMsg"></div>
       <div id="discardingStatus"></div>
     </div>
 
-    <div id="submissionsSection" style="display:none;">
-      <h3>Cartas enviadas:</h3>
-      <div id="submissionsList"></div>
-    </div>
-
-    <div id="resultsSection" style="display:none;">
+    <div id="resultsSection" style="display:none; margin-top:20px;">
       <h3>Resultado de la Ronda:</h3>
       <div id="winnerInfo"></div>
     </div>
 
-    <!-- Botón "Terminar Partida" visible en la partida para TODOS (con pass "joaquin") -->
-    <button id="endGameBtn" style="display:none;">Terminar Partida</button>
+    <!-- Botón "Terminar Partida" -->
+    <button id="endGameBtn" style="display:none; margin-top:20px;">Terminar Partida</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -122,17 +203,17 @@
     // PARTIDA
     const gameDiv = document.getElementById('game');
     const zarIndicator = document.getElementById('zarIndicator');
+    const submissionsSection = document.getElementById('submissionsSection');
+    const submissionsList = document.getElementById('submissionsList');
     const blackCardContainer = document.getElementById('blackCardContainer');
     const winnerCardDiv = document.getElementById('winnerCard');
     const myHandDiv = document.getElementById('myHand');
     const statusMsg = document.getElementById('statusMsg');
     const discardingStatus = document.getElementById('discardingStatus');
-    const submissionsSection = document.getElementById('submissionsSection');
-    const submissionsList = document.getElementById('submissionsList');
     const resultsSection = document.getElementById('resultsSection');
     const winnerInfo = document.getElementById('winnerInfo');
 
-    // BOTONES en la partida
+    // BOTONES
     const sendBtn = document.getElementById('sendBtn');
     const discardBtn = document.getElementById('discardBtn');
     const omitBtn = document.getElementById('omitBtn');
@@ -149,13 +230,14 @@
     let selectedCards = [];
     let hasSentCard = false;
 
-    // Conexión
+    /********************************************************
+     * Socket.IO
+     ********************************************************/
     socket.on('connect', () => {
       myPlayerId = socket.id;
-      console.log("Conectado con ID:", myPlayerId);
+      console.log("Conectado ID:", myPlayerId);
     });
 
-    // Errores
     socket.on('errorMessage', (data) => {
       alert(data.message);
     });
@@ -166,24 +248,24 @@
       if (name) {
         socket.emit('joinGame', name);
       } else {
-        alert("Ingresa un nombre");
+        alert("Ingresa un nombre válido");
       }
     });
 
-    // Botón Iniciar Partida
+    // Botón Iniciar
     startBtn.addEventListener('click', () => {
       socket.emit('startGame');
     });
 
-    // Botón Desconectarse
+    // Botón Desconectar
     disconnectBtn.addEventListener('click', () => {
       socket.emit('disconnectPlayer');
       resetUI();
     });
 
-    // Botón Terminar Partida (todos ven, con pass "joaquin")
+    // Botón Terminar Partida (contraseña)
     endGameBtn.addEventListener('click', () => {
-      const pass = prompt("Contraseña para terminar partida:");
+      const pass = prompt("Contraseña para terminar la partida (\"joaquin\"): ");
       if (!pass) return;
       socket.emit('endGame', pass);
     });
@@ -198,7 +280,6 @@
       playerNameInput.style.display = 'none';
       disconnectBtn.style.display = 'block';
       startBtn.style.display = 'block';
-      // endGameBtn se verá en la partida
     });
 
     // roundStarted
@@ -218,7 +299,6 @@
 
       const me = data.players.find(x => x.id === myPlayerId);
       isZar = me ? me.isCzar : false;
-
       if (isZar) {
         zarIndicator.style.display='block';
         sendBtn.style.display='none';
@@ -226,41 +306,37 @@
         zarIndicator.style.display='none';
         sendBtn.style.display='inline-block';
       }
-      sendBtn.disabled = false;
-      selectedCards = [];
-      hasSentCard = false;
+      sendBtn.disabled= false;
+      selectedCards= [];
+      hasSentCard= false;
 
       if (data.blackCard) {
-        blackCardContainer.innerHTML = renderBlackCard(data.blackCard.text);
+        blackCardContainer.innerHTML= renderBlackCard(data.blackCard.text);
       } else {
-        blackCardContainer.innerHTML = `<div class="card-box card-black">???</div>`;
+        blackCardContainer.innerHTML= `<div class="card-box card-black">???</div>`;
       }
 
-      // Al entrar en la partida, se ve "Terminar Partida"
       endGameBtn.style.display='block';
       omitBtn.style.display='none';
     });
 
     // yourHand
     socket.on('yourHand', (d) => {
-      myHand = d.cards;
+      myHand= d.cards;
       renderMyHand();
     });
 
-    // showSubmissions
+    // showSubmissions (mostrar cartas enviadas ARRIBA de la mano)
     socket.on('showSubmissions', (subs) => {
       submissionsSection.style.display='block';
       submissionsList.innerHTML='';
       subs.forEach(s=> {
-        const div = document.createElement('div');
+        const div= document.createElement('div');
         div.classList.add('card-box','card-white');
-        div.style.margin="5px";
-        div.innerHTML = `
+        div.innerHTML= `
           <p>${s.text}</p>
           ${
-            isZar
-              ? `<button onclick="selectWinner('${s.submissionId}')">Elegir Ganadora</button>`
-              : ''
+            isZar ? `<button onclick="selectWinner('${s.submissionId}')">Elegir Ganadora</button>` : ''
           }
         `;
         submissionsList.appendChild(div);
@@ -271,8 +347,8 @@
     socket.on('roundResult', (d) => {
       resultsSection.style.display='block';
       winnerInfo.innerHTML= `
-        Ganó <strong>${d.winnerName}</strong> (+${d.pointsWon} punto).
-        <br/>Total: ${d.totalPoints} puntos.
+        Ganó <strong>${d.winnerName}</strong> (+${d.pointsWon} punto).<br/>
+        Total: ${d.totalPoints} puntos.
       `;
       winnerCardDiv.style.display='block';
       winnerCardDiv.innerHTML= renderWhiteCard(d.winnerCardText);
@@ -286,28 +362,42 @@
 
     // stillDiscarding
     socket.on('stillDiscarding', (data) => {
-      discardingStatus.innerHTML= data.text;
+      discardingStatus.textContent= data.text; // Más limpio que innerHTML
       omitBtn.style.display='inline-block';
     });
 
     // discardPhaseEnded
     socket.on('discardPhaseEnded', () => {
-      discardingStatus.innerHTML='';
+      discardingStatus.textContent='';
       omitBtn.style.display='none';
     });
 
-    // showIntermediate
+    // showIntermediate con countdown real
     socket.on('showIntermediate', (d) => {
       intermediateScreen.style.display='flex';
-      let msg = d.message || "Esperando...";
+      let timeLeft = d.timeLeft || 3; 
+      let msg = `<p>La siguiente ronda iniciará en <span id="countdownVal">${timeLeft}</span> seg...</p>`;
+      
       if (d.scores) {
         msg += "<h3>Puntajes actuales:</h3><ul>";
-        d.scores.forEach(s => {
+        d.scores.forEach(s=>{
           msg += `<li>${s.name}: ${s.points}</li>`;
         });
         msg += "</ul>";
       }
       intermediateMsg.innerHTML= msg;
+
+      // Countdown
+      let inter = setInterval(() => {
+        timeLeft--;
+        const cdSpan = document.getElementById('countdownVal');
+        if (cdSpan) {
+          cdSpan.textContent = timeLeft;
+        }
+        if (timeLeft <= 0) {
+          clearInterval(inter);
+        }
+      }, 1000);
     });
 
     // updateHand
@@ -318,7 +408,7 @@
 
     // gameEnded
     socket.on('gameEnded', (d) => {
-      let txt= `<h2>Puntajes Finales</h2><ul>`;
+      let txt= `<h2>¡La partida ha terminado!</h2><ul>`;
       d.scores.forEach(s=> {
         txt+= `<li>${s.name}: ${s.points}</li>`;
       });
@@ -328,58 +418,60 @@
       setTimeout(()=>{
         intermediateScreen.style.display='none';
         resetUI();
-      },4000);
+      }, 4000);
     });
 
-    // PARTIDA - Botones
+    /********************************************************
+     * Botones de PARTIDA
+     ********************************************************/
     sendBtn.addEventListener('click', () => {
       if (hasSentCard) {
-        alert("Ya enviaste tu carta.");
+        statusMsg.textContent="Ya enviaste tu carta.";
         return;
       }
       if (selectedCards.length !== 1) {
-        alert("Selecciona 1 carta para enviar.");
+        statusMsg.textContent="Selecciona 1 carta para enviar.";
         return;
       }
       if (isZar) {
-        alert("Eres el ZAR, no envías carta.");
+        statusMsg.textContent="Eres el ZAR, no envías carta.";
         return;
       }
       const chosen= selectedCards[0];
       socket.emit('sendCard', chosen.id);
       hasSentCard= true;
       sendBtn.disabled= true;
-      statusMsg.innerText="Carta enviada.";
+      statusMsg.textContent="Carta enviada.";
       selectedCards=[];
       renderMyHand();
     });
 
     discardBtn.addEventListener('click', () => {
       if (selectedCards.length===0) {
-        alert("No seleccionaste cartas.");
+        statusMsg.textContent="No seleccionaste ninguna carta para descartar.";
         return;
       }
       if (selectedCards.length>3) {
-        alert("Máximo 3.");
+        statusMsg.textContent="Máximo 3 cartas para descartar.";
         return;
       }
       const arr= selectedCards.map(c=> c.id);
       socket.emit('discardCards', arr);
-      statusMsg.innerText=`Descartaste ${selectedCards.length} carta(s).`;
+      statusMsg.textContent=`Descartaste ${selectedCards.length} carta(s).`;
       selectedCards=[];
       renderMyHand();
     });
 
     omitBtn.addEventListener('click', () => {
       socket.emit('omitDiscard');
-      statusMsg.innerText= "Descartar omitido.";
+      statusMsg.textContent= "Has omitido descartar.";
       omitBtn.style.display='none';
     });
 
     /********************************************************
      * FUNCIONES AUX
      ********************************************************/
-    function resetUI(){
+    function resetUI() {
       lobbyDiv.style.display='block';
       gameDiv.style.display='none';
       playerNameInput.value='';
@@ -390,8 +482,8 @@
     }
 
     function renderMyHand(){
-      myHandDiv.innerHTML='';
-      selectedCards=[];
+      myHandDiv.innerHTML= '';
+      selectedCards= [];
       myHand.forEach(card => {
         const cDiv= document.createElement('div');
         cDiv.classList.add('card-box','card-white');
@@ -425,7 +517,6 @@
     function renderWhiteCard(txt){
       return `<div class="card-box card-white">${txt}</div>`;
     }
-
   </script>
 </body>
 </html>

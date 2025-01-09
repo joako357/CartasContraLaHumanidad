@@ -23,10 +23,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Servir la carpeta public
+// Servir la carpeta 'public'
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Estado del juego
+// Variables del juego
 let players = [];
 let blackCards = [];
 let whiteCards = [];
@@ -45,23 +45,26 @@ let discardTimeout = null;
  ******************************************************/
 function startNewRound() {
   discardPhaseActive = false;
-  // Avanzar ZAR
+
+  // Avanzar Zar
   players[currentZarIndex].isCzar = false;
   currentZarIndex = (currentZarIndex + 1) % players.length;
   players[currentZarIndex].isCzar = true;
 
-  // Sacar siguiente carta negra
   const blackCard = blackCards.shift();
 
-  // Mostrar fase intermedia (3s) con puntajes
+  // Ordenar por puntaje
   const sorted = [...players].sort((a, b) => b.points - a.points);
+
+  // En lugar de "3 segundos" fijo, enviamos timeLeft = 5
+  let timeLeft = 5;
   io.emit('showIntermediate', {
-    message: "Nueva ronda en 3s...",
+    timeLeft,
     scores: sorted.map(p => ({ name: p.name, points: p.points }))
   });
 
   setTimeout(() => {
-    // Reponer cartas (hasta 8)
+    // Reponer cartas hasta 8
     players.forEach(p => {
       while (p.cards.length < 8 && whiteCards.length > 0) {
         p.cards.push(whiteCards.shift());
@@ -76,12 +79,13 @@ function startNewRound() {
       }))
     });
 
+    // Enviar la mano a cada jugador
     players.forEach(pl => {
       io.to(pl.id).emit('yourHand', { cards: pl.cards });
     });
 
     currentSubmissions = [];
-  }, 3000);
+  }, timeLeft * 1000);
 }
 
 function startDiscardPhase() {
@@ -89,6 +93,7 @@ function startDiscardPhase() {
   discardTimeLeft = 15;
 
   broadcastStillDiscarding();
+
   discardInterval = setInterval(() => {
     discardTimeLeft--;
     broadcastStillDiscarding();
@@ -137,17 +142,15 @@ function endDiscardPhase() {
 io.on('connection', (socket) => {
   console.log("Cliente conectado:", socket.id);
 
-  // Unirse al juego
-  socket.on('joinGame', (playerName) => {
-    console.log(`joinGame => id:${socket.id}, name:${playerName}`);
+  // Unirse
+  socket.on('joinGame', (name) => {
     if (gameInProgress) {
       socket.emit('errorMessage', { message: "La partida ya comenzó." });
       return;
     }
-    // Añadir jugador
     players.push({
       id: socket.id,
-      name: playerName,
+      name,
       points: 0,
       cards: [],
       isCzar: false,
@@ -164,7 +167,6 @@ io.on('connection', (socket) => {
 
   // Iniciar partida
   socket.on('startGame', () => {
-    console.log('startGame => id:', socket.id);
     if (players.length < 3) {
       socket.emit('errorMessage', { message: "Se necesitan al menos 3 jugadores." });
       return;
@@ -173,7 +175,6 @@ io.on('connection', (socket) => {
       socket.emit('errorMessage', { message: "La partida ya está en curso." });
       return;
     }
-
     gameInProgress = true;
     blackCards = shuffleArray([...blackCardsData]);
     whiteCards = shuffleArray([...whiteCardsData]);
@@ -200,10 +201,9 @@ io.on('connection', (socket) => {
       io.to(pl.id).emit('yourHand', { cards: pl.cards });
     });
     currentSubmissions = [];
-    console.log('Partida iniciada');
   });
 
-  // Enviar carta
+  // Enviar 1 carta
   socket.on('sendCard', (cardId) => {
     const pl = players.find(p => p.id === socket.id);
     if (!pl || pl.isCzar) return;
@@ -273,7 +273,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Omitir descarte
+  // Omitir
   socket.on('omitDiscard', () => {
     const pl = players.find(p => p.id === socket.id);
     if (!pl) return;
@@ -285,7 +285,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Terminar partida (contraseña "joaquin")
+  // Terminar con pass= "joaquin"
   socket.on('endGame', (pass) => {
     if (pass !== "joaquin") {
       socket.emit('errorMessage', { message: "Contraseña incorrecta." });

@@ -6,11 +6,11 @@ const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
 
-// Archivos de cartas
+// Cartas
 const blackCardsData = require('./blackCards.js');
 const whiteCardsData = require('./whiteCards.js');
 
-// Función para barajar
+// Barajar
 function shuffleArray(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -23,48 +23,43 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Servir la carpeta 'public'
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Variables del juego
 let players = [];
 let blackCards = [];
 let whiteCards = [];
 let currentSubmissions = [];
+
 let currentZarIndex = 0;
 let gameInProgress = false;
 
-// Manejo de descarte (15s)
 let discardPhaseActive = false;
 let discardTimeLeft = 15;
 let discardInterval = null;
 let discardTimeout = null;
 
 /******************************************************
- * Funciones
+ * Rondas
  ******************************************************/
 function startNewRound() {
   discardPhaseActive = false;
 
-  // Avanzar Zar
+  // Pasar Zar
   players[currentZarIndex].isCzar = false;
   currentZarIndex = (currentZarIndex + 1) % players.length;
   players[currentZarIndex].isCzar = true;
 
-  const blackCard = blackCards.shift();
+  const black = blackCards.shift();
 
-  // Ordenar por puntaje
+  // scoreboard
   const sorted = [...players].sort((a, b) => b.points - a.points);
-
-  // En lugar de "3 segundos" fijo, enviamos timeLeft = 5
-  let timeLeft = 5;
+  const timeLeft = 5;
   io.emit('showIntermediate', {
     timeLeft,
     scores: sorted.map(p => ({ name: p.name, points: p.points }))
   });
 
   setTimeout(() => {
-    // Reponer cartas hasta 8
     players.forEach(p => {
       while (p.cards.length < 8 && whiteCards.length > 0) {
         p.cards.push(whiteCards.shift());
@@ -73,17 +68,18 @@ function startNewRound() {
     });
 
     io.emit('roundStarted', {
-      blackCard,
-      players: players.map(({ id, name, points, isCzar }) => ({
-        id, name, points, isCzar
+      blackCard: black,
+      players: players.map(p => ({
+        id: p.id,
+        name: p.name,
+        points: p.points,
+        isCzar: p.isCzar
       }))
     });
 
-    // Enviar la mano a cada jugador
     players.forEach(pl => {
       io.to(pl.id).emit('yourHand', { cards: pl.cards });
     });
-
     currentSubmissions = [];
   }, timeLeft * 1000);
 }
@@ -91,7 +87,6 @@ function startNewRound() {
 function startDiscardPhase() {
   discardPhaseActive = true;
   discardTimeLeft = 15;
-
   broadcastStillDiscarding();
 
   discardInterval = setInterval(() => {
@@ -142,15 +137,14 @@ function endDiscardPhase() {
 io.on('connection', (socket) => {
   console.log("Cliente conectado:", socket.id);
 
-  // Unirse
-  socket.on('joinGame', (name) => {
+  socket.on('joinGame', (playerName) => {
     if (gameInProgress) {
       socket.emit('errorMessage', { message: "La partida ya comenzó." });
       return;
     }
     players.push({
       id: socket.id,
-      name,
+      name: playerName,
       points: 0,
       cards: [],
       isCzar: false,
@@ -165,7 +159,6 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Iniciar partida
   socket.on('startGame', () => {
     if (players.length < 3) {
       socket.emit('errorMessage', { message: "Se necesitan al menos 3 jugadores." });
@@ -192,23 +185,28 @@ io.on('connection', (socket) => {
     const black = blackCards.shift();
     io.emit('roundStarted', {
       blackCard: black,
-      players: players.map(({ id, name, points, isCzar }) => ({
-        id, name, points, isCzar
+      players: players.map(pl => ({
+        id: pl.id,
+        name: pl.name,
+        points: pl.points,
+        isCzar: pl.isCzar
       }))
     });
-
     players.forEach(pl => {
       io.to(pl.id).emit('yourHand', { cards: pl.cards });
     });
     currentSubmissions = [];
   });
 
-  // Enviar 1 carta
+  // ENVIAR CARTA
   socket.on('sendCard', (cardId) => {
     const pl = players.find(p => p.id === socket.id);
     if (!pl || pl.isCzar) return;
 
+    // Elimina de la mano
     pl.cards = pl.cards.filter(c => c.id !== cardId);
+
+    // Submissions
     if (!currentSubmissions) currentSubmissions = [];
     currentSubmissions.push({
       submissionId: socket.id + "-" + cardId,
@@ -254,7 +252,7 @@ io.on('connection', (socket) => {
     startDiscardPhase();
   });
 
-  // Descartar
+  // DESCARTAR (una sola vez)
   socket.on('discardCards', (cardIds) => {
     const pl = players.find(p => p.id === socket.id);
     if (!pl) return;
@@ -262,10 +260,12 @@ io.on('connection', (socket) => {
       socket.emit('errorMessage', { message: "Solo descartas una vez." });
       return;
     }
-    if (cardIds.length > 3) return;
-
+    // Elimina todas las cartas elegidas
     pl.cards = pl.cards.filter(cc => !cardIds.includes(cc.id));
+
+    // Marca
     pl.hasDiscarded = true;
+
     io.to(pl.id).emit('updateHand', { cards: pl.cards });
 
     if (discardPhaseActive) {
@@ -273,7 +273,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Omitir
   socket.on('omitDiscard', () => {
     const pl = players.find(p => p.id === socket.id);
     if (!pl) return;
@@ -285,7 +284,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Terminar con pass= "joaquin"
+  // Terminar
   socket.on('endGame', (pass) => {
     if (pass !== "joaquin") {
       socket.emit('errorMessage', { message: "Contraseña incorrecta." });
@@ -293,8 +292,8 @@ io.on('connection', (socket) => {
     }
     gameInProgress = false;
     discardPhaseActive = false;
-    clearInterval(discardInterval);
     clearTimeout(discardTimeout);
+    clearInterval(discardInterval);
 
     const sorted = [...players].sort((a, b) => b.points - a.points);
     io.emit('gameEnded', {
@@ -303,22 +302,20 @@ io.on('connection', (socket) => {
     players = [];
   });
 
-  // Desconexión voluntaria
   socket.on('disconnectPlayer', () => {
     players = players.filter(p => p.id !== socket.id);
     io.emit('updatePlayers', {
-      players: players.map(({ name, points }) => ({ name, points }))
+      players: players.map(px => ({ name: px.name, points: px.points }))
     });
     if (players.length === 0) {
       gameInProgress = false;
     }
   });
 
-  // Desconexión
   socket.on('disconnect', () => {
     players = players.filter(p => p.id !== socket.id);
     io.emit('updatePlayers', {
-      players: players.map(({ name, points }) => ({ name, points }))
+      players: players.map(px => ({ name: px.name, points: px.points }))
     });
     if (players.length === 0) {
       gameInProgress = false;

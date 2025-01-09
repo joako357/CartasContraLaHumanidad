@@ -1,0 +1,24 @@
+{
+  "name": "cartascontralahumanidad",
+  "version": "1.0.0",
+  "description": "Un juego estilo 'Cartas contra la humanidad' implementado con Node.js y Socket.IO",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"No test specified\" && exit 1"
+  },
+  "keywords": [
+    "cartas",
+    "humor",
+    "juego",
+    "socket.io",
+    "nodejs"
+  ],
+  "author": "Tu Nombre",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  }
+}

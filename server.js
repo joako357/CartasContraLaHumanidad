@@ -18,14 +18,17 @@ function shuffleArray(array) {
   return array;
 }
 
-let players = [];             // Lista de jugadores
-let blackCards = [];          // Mazo barajado de cartas negras
-let whiteCards = [];          // Mazo barajado de cartas blancas
-let currentSubmissions = [];  // Cartas enviadas en esta ronda
-let currentZarIndex = 0;      // Índice del Zar
-let extraDiscardTimer = null; // Para el setTimeout
-let timeLeft = 0;             // Tiempo que queda en la fase de descarte
-let discardInterval = null;   // Para el setInterval
+let players = [];             
+let blackCards = [];          
+let whiteCards = [];          
+let currentSubmissions = [];  
+let currentZarIndex = 0;      
+let extraDiscardTimer = null; 
+let discardInterval = null;
+let timeLeft = 0;
+let gameInProgress = false; // Bloquear uniones al iniciar
+
+let extraPhaseActive = false; // Para saber si estamos en los 15 seg extra
 
 const app = express();
 const server = http.createServer(app);
@@ -33,19 +36,21 @@ const io = new Server(server);
 
 app.use(express.static('public'));
 
-// Inicia una nueva ronda
+// ===================== Reglas de Rondas =====================
 function startNewRound() {
-  // 1. Retirar al Zar anterior
-  players[currentZarIndex].isCzar = false;
+  // Termina la fase extra, por si quedaba
+  extraPhaseActive = false;
 
-  // 2. Avanzar el Zar
+  // Retirar Zar anterior
+  players[currentZarIndex].isCzar = false;
+  // Avanzar Zar
   currentZarIndex = (currentZarIndex + 1) % players.length;
   players[currentZarIndex].isCzar = true;
 
-  // 3. Sacar carta negra
+  // Siguiente carta negra
   const currentBlackCard = blackCards.shift();
 
-  // 4. Avisar roundStarted
+  // Emitir roundStarted
   io.emit('roundStarted', {
     blackCard: currentBlackCard,
     players: players.map(({ id, name, points, isCzar }) => ({
@@ -53,71 +58,73 @@ function startNewRound() {
     }))
   });
 
-  // 5. Reenviar la mano a cada jugador
-  players.forEach((p) => {
-    p.hasDiscarded = false;  // Reset “hasDiscarded” al comenzar ronda
+  // Reenviar mano
+  players.forEach(p => {
+    p.hasDiscarded = false; // reset
     io.to(p.id).emit('yourHand', { cards: p.cards });
   });
 
-  // 6. Limpiar submissions
   currentSubmissions = [];
 }
 
-// Verifica si todos ya descartaron
 function checkAllDiscarded() {
-  const stillDiscarding = players.filter(p => p.hasDiscarded === false && !p.isCzar);
-  // El Zar también puede descartar, si quieres...  
-  // Podrías excluir al Zar si no debe descartar. Ajusta según tu regla.
+  if (!extraPhaseActive) {
+    // Si no estamos en la fase extra, no mostramos nada global
+    return;
+  }
+  // En fase extra, sí chequeamos y anunciamos
+  const stillDiscarding = players.filter(p => !p.hasDiscarded);
   if (stillDiscarding.length === 0) {
-    // Todos descartaron => terminar la fase extra
+    // Todos descartaron
     clearTimeout(extraDiscardTimer);
     clearInterval(discardInterval);
     io.emit('discardPhaseEnded');
     startNewRound();
   } else {
-    // Avisar quién está descartando
+    // Avisar a todos quién falta
     const names = stillDiscarding.map(p => p.name);
-    io.emit('discardingStatus', { 
-      stillDiscarding: names
-    });
+    io.emit('discardingStatus', { stillDiscarding: names });
   }
 }
 
-// Maneja la fase de descarte extra (15s) después de elegir ganador
 function startExtraDiscardPhase() {
+  extraPhaseActive = true;
   timeLeft = 15;
-  // Avisar a todos
+
   io.emit('extraDiscardTime', { seconds: timeLeft });
 
-  // Repetir cada segundo para actualizar “timeLeft” y checkAllDiscarded
   discardInterval = setInterval(() => {
     timeLeft--;
+    io.emit('updateDiscardTime', { timeLeft });
     if (timeLeft <= 0) {
       clearInterval(discardInterval);
     }
-    io.emit('updateDiscardTime', { timeLeft });
   }, 1000);
 
-  // Cuando pase el tiempo, iniciamos la siguiente ronda (si no acabó antes)
   extraDiscardTimer = setTimeout(() => {
     io.emit('discardPhaseEnded');
     startNewRound();
   }, 15000);
 }
 
-// Conexiones
+// ===================== Socket.IO =====================
 io.on('connection', (socket) => {
   console.log('Nuevo cliente conectado:', socket.id);
 
   // Unirse
   socket.on('joinGame', (playerName) => {
+    if (gameInProgress) {
+      socket.emit('errorMessage', { message: 'El juego ya está en curso, no puedes unirte ahora.' });
+      return;
+    }
+
     players.push({
       id: socket.id,
       name: playerName,
       points: 0,
       cards: [],
       isCzar: false,
-      hasDiscarded: false // Para saber si ya descartó
+      hasDiscarded: false
     });
     io.emit('updatePlayers', players);
   });
@@ -130,27 +137,22 @@ io.on('connection', (socket) => {
       });
       return;
     }
+    gameInProgress = true;
 
-    // Barajar
     blackCards = shuffleArray([...blackCardsData]);
     whiteCards = shuffleArray([...whiteCardsData]);
 
-    // Repartir 8 cartas a cada jugador
-    players.forEach((p) => {
+    players.forEach(p => {
       p.cards = whiteCards.splice(0, 8);
       p.points = 0;
       p.isCzar = false;
       p.hasDiscarded = false;
     });
 
-    // Asignar ZAR
     currentZarIndex = 0;
     players[currentZarIndex].isCzar = true;
 
-    // Sacar carta negra
     const currentBlackCard = blackCards.shift();
-
-    // Emitir roundStarted
     io.emit('roundStarted', {
       blackCard: currentBlackCard,
       players: players.map(({ id, name, points, isCzar }) => ({
@@ -158,36 +160,36 @@ io.on('connection', (socket) => {
       }))
     });
 
-    // Enviar mano
-    players.forEach((pl) => {
-      io.to(pl.id).emit('yourHand', { cards: pl.cards });
+    players.forEach(p => {
+      io.to(p.id).emit('yourHand', { cards: p.cards });
     });
 
     currentSubmissions = [];
   });
 
-  // submitCards -> 1 carta
+  // Enviar 1 carta
   socket.on('submitCards', ({ chosenCard }) => {
     const player = players.find(p => p.id === socket.id);
-    if (!player || player.isCzar) {
+    if (!player) return;
+
+    // El Zar no envía cartas
+    if (player.isCzar) {
+      // ignorar
       return;
     }
 
-    // Agregamos la submission
     currentSubmissions.push({
       submissionId: `${socket.id}-${chosenCard.id}`,
       playerId: player.id,
       cardId: chosenCard.id
     });
 
-    // Quitar de la mano
     player.cards = player.cards.filter(c => c.id !== chosenCard.id);
 
-    // Revisa si TODOS los no-Zar enviaron
-    const nonZarPlayers = players.filter(p => !p.isCzar);
+    // check si todos enviaron
+    const nonZarPlayers = players.filter(pl => !pl.isCzar);
     if (currentSubmissions.length === nonZarPlayers.length) {
-      // Todos enviaron -> mostrar
-      const submissionsToShow = currentSubmissions.map((s) => {
+      const submissionsToShow = currentSubmissions.map(s => {
         const cardObj = whiteCardsData.find(w => w.id === s.cardId);
         return {
           submissionId: s.submissionId,
@@ -203,12 +205,10 @@ io.on('connection', (socket) => {
   socket.on('selectWinner', (submissionId) => {
     const chosen = currentSubmissions.find(s => s.submissionId === submissionId);
     if (!chosen) return;
-
-    // Sumar punto
     const winner = players.find(p => p.id === chosen.playerId);
     if (!winner) return;
-    winner.points++;
 
+    winner.points++;
     io.emit('roundResult', {
       winnerId: winner.id,
       winnerName: winner.name,
@@ -218,41 +218,39 @@ io.on('connection', (socket) => {
     });
 
     currentSubmissions = [];
-
-    // Iniciar fase extra de descarte
     startExtraDiscardPhase();
   });
 
-  // Descartar en cualquier momento (hasta 3)
+  // Descartar (una vez por ronda, hasta 3)
   socket.on('requestDiscard', ({ discardCardIds }) => {
     const player = players.find(p => p.id === socket.id);
     if (!player) return;
 
+    // Si ya descartó
     if (player.hasDiscarded) {
-        // ignorar o mandar un mensaje
-        io.to(player.id).emit('errorMessage', { message: 'Solo puedes descartar una vez por ronda.' });
-        return;
-      }
+      io.to(player.id).emit('errorMessage', {
+        message: 'Solo puedes descartar una vez por ronda.'
+      });
+      return;
+    }
 
     if (discardCardIds.length > 3) {
-      return; // ignora
+      return;
     }
 
     // Quitar
     player.cards = player.cards.filter(c => !discardCardIds.includes(c.id));
-
-    // Repartir hasta 8
     while (player.cards.length < 8 && whiteCards.length > 0) {
       player.cards.push(whiteCards.shift());
     }
 
-    // Marcar que ya descartó
+    // Marcamos
     player.hasDiscarded = true;
 
-    // Actualizar mano
+    // Enviamos mano actualizada
     io.to(player.id).emit('updateHand', { cards: player.cards });
 
-    // Chequear si todos ya descartaron
+    // checkAllDiscarded SOLO si estamos en fase extra
     checkAllDiscarded();
   });
 
@@ -269,7 +267,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000; 
 server.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });

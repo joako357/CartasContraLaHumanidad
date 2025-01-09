@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>Juego - Versión Ajustada</title>
+  <title>Juego - Versión Final</title>
   <style>
     .card-selection {
       border: 1px solid blue;
@@ -50,7 +50,7 @@
       <h3>Mi mano (8 cartas):</h3>
       <div id="myHand"></div>
 
-      <!-- Modo Enviar / Descartar MOVIDO ABAJO de la mano -->
+      <!-- Modo Enviar / Descartar -->
       <div style="margin-top: 10px;">
         <label><input type="radio" name="mode" value="send" checked> Modo Enviar</label>
         <label><input type="radio" name="mode" value="discard"> Modo Descartar</label>
@@ -58,7 +58,6 @@
 
       <button id="submitCardBtn" style="display: none;">Enviar Carta Seleccionada</button>
       <button id="discardBtn">Descartar Carta(s) Seleccionada(s) (máx 3)</button>
-
       <div id="statusMsg" style="color: green;"></div>
       <div id="discardingStatus"></div>
     </div>
@@ -127,7 +126,7 @@
     let isZar = false;
     let myHand = [];
     let selectedCards = []; 
-    let hasSentCard = false;
+    let hasSentCard = false; 
     let extraTimeInterval = null;
 
     /********************************************************
@@ -149,6 +148,7 @@
       socket.emit('startGame');
     });
 
+    // Enviar la carta (solo 1)
     submitCardBtn.addEventListener('click', () => {
       if (hasSentCard) {
         alert("Ya enviaste tu carta en esta ronda.");
@@ -156,6 +156,11 @@
       }
       if (selectedCards.length !== 1) {
         alert("Selecciona exactamente 1 carta en Modo Enviar.");
+        return;
+      }
+      // Si soy ZAR y quiero enviar => no se puede
+      if (isZar) {
+        alert("Eres el ZAR, no participas enviando carta.");
         return;
       }
       const chosenCard = selectedCards[0];
@@ -167,6 +172,7 @@
       renderMyHand();
     });
 
+    // Descartar
     discardBtn.addEventListener('click', () => {
       if (selectedCards.length === 0) {
         alert("No has seleccionado ninguna carta para descartar.");
@@ -228,7 +234,7 @@
       zarIndicator.style.display = isZar ? 'inline-block' : 'none';
       blackCardPrompt.innerText = data.blackCard ? data.blackCard.text : 'Sin carta negra';
 
-      // Reseteo flags
+      // Reseteo
       hasSentCard = false;
       submitCardBtn.disabled = false;
       selectedCards = [];
@@ -276,7 +282,7 @@
       `;
     });
 
-    // Empieza la fase extra
+    // Empieza fase extra
     socket.on('extraDiscardTime', ({ seconds }) => {
       extraTimeMsg.style.display = 'block';
       extraTimeSec.innerText = seconds;
@@ -290,13 +296,13 @@
       }
     });
 
-    // Cuando la fase de descarte termina
+    // Al terminar la fase
     socket.on('discardPhaseEnded', () => {
       extraTimeMsg.style.display = 'none';
       discardingStatus.innerText = '';
     });
 
-    // Quién sigue descartando
+    // Faltan por descartar
     socket.on('discardingStatus', ({ stillDiscarding }) => {
       if (stillDiscarding.length > 0) {
         discardingStatus.innerText = `Faltan por descartar: ${stillDiscarding.join(', ')}`;
@@ -315,18 +321,14 @@
      ********************************************************/
     function renderMyHand() {
       myHandDiv.innerHTML = '';
-      // No vaciamos selectedCards aquí, para no resetear la selección
-      // pero lo haremos para simplificar la experiencia
+      // Reseteamos la selección
       selectedCards = [];
+
       myHand.forEach(card => {
         const cDiv = document.createElement('div');
         cDiv.classList.add('card-selection');
         cDiv.textContent = card.text;
         cDiv.addEventListener('click', () => {
-          if (isZar) {
-            alert("Eres el ZAR, no envías carta.");
-            return;
-          }
           toggleCard(card, cDiv);
         });
         myHandDiv.appendChild(cDiv);
@@ -339,9 +341,13 @@
         selectedCards.splice(index, 1);
         elDiv.classList.remove('card-selected');
       } else {
-        // Ver modo
         let m = getMode();
         if (m === 'send') {
+          // Si ya enviaste, no dejes
+          if (hasSentCard) {
+            alert("Ya enviaste tu carta en esta ronda.");
+            return;
+          }
           if (selectedCards.length >= 1) {
             alert("Solo 1 carta para enviar.");
             return;
